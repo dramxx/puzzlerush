@@ -1,0 +1,121 @@
+import { useMemo, useState } from "react";
+import { Chess, type Square } from "chess.js";
+import { Chessboard, defaultPieces } from "react-chessboard";
+
+export type Arrow = { startSquare: string; endSquare: string; color: string };
+
+type Props = {
+  fen: string;
+  orientation: "white" | "black";
+  canMove: boolean;
+  onMove: (from: string, to: string, promotion?: string) => void;
+  highlights?: Record<string, string>; // square -> background color
+  arrows?: Arrow[];
+};
+
+const FILES = ["a", "b", "c", "d", "e", "f", "g", "h"];
+const RANKS = ["8", "7", "6", "5", "4", "3", "2", "1"];
+const DOT = "radial-gradient(circle, rgba(0,0,0,.18) 22%, transparent 24%)";
+const RING = "radial-gradient(circle, transparent 72%, rgba(0,0,0,.18) 74%)";
+const SELECTED = "rgba(255,255,51,.5)";
+
+export function Board({ fen, orientation, canMove, onMove, highlights = {}, arrows = [] }: Props) {
+  const chess = useMemo(() => new Chess(fen), [fen]);
+  const myColor = orientation[0]; // "w" | "b"
+  // Selection and pending promotion are tied to the position they were made in.
+  const [sel, setSel] = useState<{ fen: string; square: string } | null>(null);
+  const [promo, setPromo] = useState<{ fen: string; from: string; to: string } | null>(null);
+  const selected = canMove && sel?.fen === fen ? sel.square : null;
+  const pendingPromo = canMove && promo?.fen === fen ? promo : null;
+
+  const targets = useMemo(
+    () => (selected ? chess.moves({ square: selected as Square, verbose: true }) : []),
+    [chess, selected],
+  );
+
+  function attempt(from: string, to: string) {
+    const legal = chess.moves({ square: from as Square, verbose: true }).filter((m) => m.to === to);
+    setSel(null);
+    if (!legal.length) return false;
+    if (legal.some((m) => m.promotion)) {
+      setPromo({ fen, from, to });
+      return false;
+    }
+    onMove(from, to);
+    return true;
+  }
+
+  const styles: Record<string, React.CSSProperties> = {};
+  for (const [sq, color] of Object.entries(highlights)) styles[sq] = { backgroundColor: color };
+  if (selected) styles[selected] = { ...styles[selected], backgroundColor: SELECTED };
+  for (const m of targets) {
+    styles[m.to] = { ...styles[m.to], backgroundImage: m.captured ? RING : DOT };
+  }
+
+  const files = orientation === "white" ? FILES : [...FILES].reverse();
+  const ranks = orientation === "white" ? RANKS : [...RANKS].reverse();
+  const coord = "flex items-center justify-center text-xs sm:text-sm font-semibold text-[#9a9f8f] select-none";
+
+  return (
+    <div className="grid grid-cols-[1.25rem_1fr] grid-rows-[1fr_1.25rem] w-full">
+      <div className="grid grid-rows-8">
+        {ranks.map((r) => (
+          <div key={r} className={coord}>{r}</div>
+        ))}
+      </div>
+      <div className="relative aspect-square rounded-sm overflow-hidden shadow-lg">
+        <Chessboard
+          options={{
+            position: fen,
+            boardOrientation: orientation,
+            showNotation: false,
+            animationDurationInMs: 200,
+            allowDragging: canMove,
+            canDragPiece: ({ piece }) => piece.pieceType[0] === myColor,
+            darkSquareStyle: { backgroundColor: "#739552" },
+            lightSquareStyle: { backgroundColor: "#ebecd0" },
+            squareStyles: styles,
+            arrows,
+            onPieceDrag: ({ square }) => square && setSel({ fen, square }),
+            onPieceDrop: ({ sourceSquare, targetSquare }) =>
+              !!targetSquare && attempt(sourceSquare, targetSquare),
+            onSquareClick: ({ piece, square }) => {
+              if (!canMove) return;
+              if (selected && targets.some((m) => m.to === square)) attempt(selected, square);
+              else if (piece?.pieceType[0] === myColor && square !== selected) setSel({ fen, square });
+              else setSel(null);
+            },
+          }}
+        />
+        {pendingPromo && (
+          <div
+            className="absolute inset-0 z-10 flex items-center justify-center bg-black/50"
+            onClick={() => setPromo(null)}
+          >
+            <div className="flex gap-2 rounded-lg bg-[#ebecd0] p-2 shadow-xl">
+              {["q", "r", "b", "n"].map((p) => (
+                <button
+                  key={p}
+                  className="size-16 sm:size-20 rounded hover:bg-[#739552]/40"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setPromo(null);
+                    onMove(pendingPromo.from, pendingPromo.to, p);
+                  }}
+                >
+                  {defaultPieces[`${myColor}${p.toUpperCase()}`]()}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+      <div />
+      <div className="grid grid-cols-8">
+        {files.map((f) => (
+          <div key={f} className={coord}>{f}</div>
+        ))}
+      </div>
+    </div>
+  );
+}
