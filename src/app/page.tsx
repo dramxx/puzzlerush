@@ -6,6 +6,7 @@ import { Board } from "@/components/Board";
 import { GameLayout } from "@/components/GameLayout";
 import { loadPuzzles, pickPuzzle, targetRating, type Puzzle } from "@/lib/puzzles";
 import { readBest, saveBest, type Best } from "@/lib/best";
+import { playCountdownBeep } from "@/lib/sounds";
 
 const LIVES = 3;
 const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
@@ -19,6 +20,7 @@ export default function SurvivalPage() {
   const [run, setRun] = useState<Run | null>(null);
   const [feedback, setFeedback] = useState<"correct" | "wrong" | null>(null);
   const [saved, setSaved] = useState(false);
+  const [countdown, setCountdown] = useState<number | null>(null);
   const timer = useRef<number>(undefined);
 
   useEffect(() => {
@@ -36,6 +38,20 @@ export default function SurvivalPage() {
   const newBest = over && score > 0 && score > (best?.score ?? 0);
 
   function start() {
+    if (!puzzles) return;
+    const tick = (n: number) => {
+      setCountdown(n);
+      playCountdownBeep(3 - n);
+      timer.current = window.setTimeout(() => {
+        if (n > 1) return tick(n - 1);
+        setCountdown(null);
+        begin();
+      }, 1000);
+    };
+    tick(3);
+  }
+
+  function begin() {
     if (!puzzles) return;
     const current = pickPuzzle(puzzles, targetRating(0), new Set());
     setRun({ current, history: [], used: new Set([current.id]) });
@@ -61,7 +77,16 @@ export default function SurvivalPage() {
   }
 
   return (
+    <>
+    {countdown !== null && <div className="fixed inset-0 z-40 bg-black/60" />}
     <GameLayout
+      boardOverlay={
+        countdown !== null && (
+          <span key={countdown} className="countdown-number text-[min(40vw,40dvh)] font-bold leading-none text-white">
+            {countdown}
+          </span>
+        )
+      }
       board={
         run ? (
           <PuzzlePlayer
@@ -140,6 +165,7 @@ export default function SurvivalPage() {
         </>
       }
     />
+    </>
   );
 }
 

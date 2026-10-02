@@ -9,6 +9,8 @@ type Props = {
   orientation: "white" | "black";
   canMove: boolean;
   onMove: (from: string, to: string, promotion?: string) => void;
+  canPremove?: boolean; // opponent to move: own pieces can be queued to any square
+  onPremove?: (move: { from: string; to: string } | null) => void; // null cancels
   highlights?: Record<string, string>; // square -> background color
   arrows?: Arrow[];
 };
@@ -19,13 +21,25 @@ const DOT = "radial-gradient(circle, rgba(0,0,0,.18) 22%, transparent 24%)";
 const RING = "radial-gradient(circle, transparent 72%, rgba(0,0,0,.18) 74%)";
 const SELECTED = "rgba(255,255,51,.5)";
 
-export function Board({ fen, orientation, canMove, onMove, highlights = {}, arrows = [] }: Props) {
+export function Board({
+  fen,
+  orientation,
+  canMove,
+  onMove,
+  canPremove = false,
+  onPremove,
+  highlights = {},
+  arrows = [],
+}: Props) {
   const chess = useMemo(() => new Chess(fen), [fen]);
   const myColor = orientation[0]; // "w" | "b"
-  // Selection and pending promotion are tied to the position they were made in.
-  const [sel, setSel] = useState<{ fen: string; square: string } | null>(null);
+  const premoving = canPremove && !canMove;
+  // Pending promotion is tied to the position it was made in. A selection survives position
+  // changes (e.g. picked during the opponent's turn) while the square still holds our piece.
+  const [sel, setSel] = useState<string | null>(null);
   const [promo, setPromo] = useState<{ fen: string; from: string; to: string } | null>(null);
-  const selected = canMove && sel?.fen === fen ? sel.square : null;
+  const selected =
+    (canMove || premoving) && sel && chess.get(sel as Square)?.color === myColor ? sel : null;
   const pendingPromo = canMove && promo?.fen === fen ? promo : null;
 
   const targets = useMemo(
@@ -70,19 +84,34 @@ export function Board({ fen, orientation, canMove, onMove, highlights = {}, arro
             boardOrientation: orientation,
             showNotation: false,
             animationDurationInMs: 200,
-            allowDragging: canMove,
+            allowDragging: canMove || premoving,
             canDragPiece: ({ piece }) => piece.pieceType[0] === myColor,
             darkSquareStyle: { backgroundColor: "#739552" },
             lightSquareStyle: { backgroundColor: "#ebecd0" },
             squareStyles: styles,
             arrows,
-            onPieceDrag: ({ square }) => square && setSel({ fen, square }),
-            onPieceDrop: ({ sourceSquare, targetSquare }) =>
-              !!targetSquare && attempt(sourceSquare, targetSquare),
+            onPieceDrag: ({ square }) => square && setSel(square),
+            onPieceDrop: ({ sourceSquare, targetSquare }) => {              if (!targetSquare) return false;
+              if (canMove) return attempt(sourceSquare, targetSquare);
+              setSel(null);
+              if (targetSquare !== sourceSquare) onPremove?.({ from: sourceSquare, to: targetSquare });
+              return false;
+            },
             onSquareClick: ({ piece, square }) => {
+              if (premoving) {
+                if (piece?.pieceType[0] === myColor && square !== selected) {
+                  setSel(square);
+                  onPremove?.(null);
+                } else {
+                  if (selected && square !== selected) onPremove?.({ from: selected, to: square });
+                  else onPremove?.(null);
+                  setSel(null);
+                }
+                return;
+              }
               if (!canMove) return;
               if (selected && targets.some((m) => m.to === square)) attempt(selected, square);
-              else if (piece?.pieceType[0] === myColor && square !== selected) setSel({ fen, square });
+              else if (piece?.pieceType[0] === myColor && square !== selected) setSel(square);
               else setSel(null);
             },
           }}
